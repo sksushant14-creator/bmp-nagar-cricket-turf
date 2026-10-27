@@ -32,32 +32,30 @@
 <div><label class="label" for="phone">Mobile number</label><input id="phone" required inputmode="numeric" pattern="[6-9][0-9]{9}" maxlength="10" placeholder="10-digit mobile number"></div>
 <div><label class="label" for="notes">Notes (optional)</label><input id="notes" maxlength="200" placeholder="Team name / special request"></div>
 <div class="payment-box" id="paymentBox">
-<strong>Pay online with UPI</strong>
+<strong>Pay securely with Razorpay</strong>
 <div>Amount for selected slot: <strong id="slotPrice">Select a slot first</strong></div>
-<div class="notice">UPI ID: <span class="upi-id">9370421676@ybl</span></div>
-<a class="btn secondary wide" id="payUpi" href="upi://pay?pa=9370421676%40ybl&amp;pn=Tirumala%20Sports%20Arena%20Turf&amp;cu=INR" aria-label="Pay using UPI" style="pointer-events:none;opacity:.5">Pay via UPI app</a>
-<p class="notice">Pay the exact amount, then enter the UPI transaction ID / UTR from your payment app. Your slot stays reserved as pending until the owner verifies the payment manually.</p>
-<div><label class="label" for="utr">UPI transaction ID / UTR</label><input id="utr" required minlength="6" maxlength="80" placeholder="Enter transaction reference after payment"></div>
+<p class="notice">After selecting a slot and entering your details, click Pay Now. Razorpay will show the payment methods available for your device and account.</p>
 </div>
 <div id="status" class="status" role="status" aria-live="polite"></div>
-<button class="btn primary wide" id="confirm" type="submit">Submit Booking Request</button>
-<p class="notice">Payment is not automatically verified by this UPI link. The owner must check the payment before confirming your booking.</p>
+<button class="btn primary wide" id="confirm" type="submit">Pay Now</button>
+<p class="notice">Your booking is confirmed only after the server verifies the Razorpay payment. An unpaid temporary reservation expires after 10 minutes.</p>
 </form></div>
 <div class="card"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:14px"><strong id="slotTitle">Available time slots</strong><span class="pill" id="slotCount">17 slots</span></div><div class="slot-grid" id="slots"></div><p class="notice" style="margin-top:15px">Slots run hourly from 6:00 AM–7:00 AM through 10:00 PM–11:00 PM. Rates depend on weekday/weekend and slot start time. Past and already-started slots are hidden for today. Select one future slot before confirming.</p></div></div>
 </section>
-<section id="features"><div class="section-head"><div><div class="eyebrow">Play more. Plan easy.</div><h2>Simple, reliable booking</h2></div></div><div class="feature-grid"><div class="card feature"><div class="icon">🗓️</div><h3>Pick your date</h3><p>View the time slots for the day you want to play.</p></div><div class="card feature"><div class="icon">🔒</div><h3>Double-booking protection</h3><p>After Supabase is configured, a shared database reserves each date and start time only once. Pending payment requests also block that slot until the owner reviews them.</p></div><div class="card feature"><div class="icon">📱</div><h3>Clear hourly pricing</h3><p>Rates vary by weekday/weekend and time: weekdays ₹600/₹400/₹800; weekends ₹700/₹500/₹900 for morning, afternoon and evening slots.</p></div></div></section>
+<section id="features"><div class="section-head"><div><div class="eyebrow">Play more. Plan easy.</div><h2>Simple, reliable booking</h2></div></div><div class="feature-grid"><div class="card feature"><div class="icon">🗓️</div><h3>Pick your date</h3><p>View the time slots for the day you want to play.</p></div><div class="card feature"><div class="icon">🔒</div><h3>Double-booking protection</h3><p>After Supabase is configured, a shared database reserves each date and start time only once. A temporary reservation blocks the slot while payment is pending; successful payments are verified on the server.</p></div><div class="card feature"><div class="icon">📱</div><h3>Clear hourly pricing</h3><p>Rates vary by weekday/weekend and time: weekdays ₹600/₹400/₹800; weekends ₹700/₹500/₹900 for morning, afternoon and evening slots.</p></div></div></section>
 </main><footer class="wrap footer"><span>© <span id="year"></span> TIRUMALA SPORTS ARENA TURF · UMRI</span><span>📍 Tirumala City, Bhokar Road, Umri · 📞 8600606143 / 8600348624</span></footer>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-/* SETUP REQUIRED: paste your Supabase project URL and anon/publishable key below.
-   Never put a service_role/secret key in this public website. */
-const SUPABASE_URL = "https://wsyinrlnfqxkbqikgouo.supabase.co/rest/v1/";
+/* Public Supabase project URL and publishable/anon key only.
+   Never put Razorpay Secret or Supabase service-role key in this website. */
+const SUPABASE_URL = "https://wsyinrlnfqxkbqikgouo.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_gh7iRFKvriYnUisE8y7Ppg_35hByVHn";
 const configured = SUPABASE_URL.startsWith("https://") && !SUPABASE_URL.includes("PASTE_") && !SUPABASE_ANON_KEY.includes("PASTE_");
 const db = configured ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 const $ = id => document.getElementById(id);
 const dateInput=$("date"), slotsEl=$("slots"), statusEl=$("status"), confirmBtn=$("confirm");
-let selectedSlot=null, bookedSlots=new Set(), paymentOpened=false;
+let selectedSlot=null, bookedSlots=new Set(), paymentInProgress=false;
 $("year").textContent=new Date().getFullYear();
 function localDateString(date=new Date()){const y=date.getFullYear(),m=String(date.getMonth()+1).padStart(2,"0"),d=String(date.getDate()).padStart(2,"0");return `${y}-${m}-${d}`}
 let localDate=localDateString();
@@ -74,12 +72,101 @@ function selectedPrice(){
  if(selectedSlot<18) return weekend?500:400; // noon–before 6 PM
  return weekend?900:800; // 6 PM onward
 }
-function updatePayment(){const priceEl=$("slotPrice"), pay=$("payUpi");if(selectedSlot===null){priceEl.textContent="Select a slot first";pay.style.pointerEvents="none";pay.style.opacity=".5";pay.href="upi://pay?pa=9370421676%40ybl&pn=Tirumala%20Sports%20Arena%20Turf&cu=INR";return}const amount=selectedPrice(), label=times().find(x=>x.start===selectedSlot)?.label||"Turf booking";priceEl.textContent=`₹${amount} / 1 hour`;pay.href=`upi://pay?pa=9370421676%40ybl&pn=Tirumala%20Sports%20Arena%20Turf&am=${amount}.00&cu=INR&tn=${encodeURIComponent(`Tirumala Sports Arena Turf ${dateInput.value} ${label}`)}`;pay.style.pointerEvents="auto";pay.style.opacity="1"}
-$("payUpi").addEventListener("click",()=>{if(selectedSlot===null){message("Please select a slot first.",true);return}paymentOpened=true;message("UPI app opened (or should open). Complete the payment, then enter its UTR below. The website cannot verify payment automatically.")});
-function renderSlots(){slotsEl.innerHTML="";const visibleTimes=times().filter(s=>!isPastOrStarted(s.start));if(selectedSlot!==null&&!visibleTimes.some(s=>s.start===selectedSlot))selectedSlot=null;for(const s of visibleTimes){const b=document.createElement("button");b.type="button";b.className="slot";b.disabled=bookedSlots.has(s.start);if(b.disabled)b.classList.add("booked");if(selectedSlot===s.start)b.classList.add("selected");b.innerHTML=`${s.label}<small>${b.disabled?"BOOKED":"AVAILABLE"}</small>`;b.addEventListener("click",()=>{selectedSlot=s.start;paymentOpened=false;$("utr").value="";slotsEl.querySelectorAll(".slot").forEach(x=>x.classList.remove("selected"));b.classList.add("selected");updatePayment();message(`Selected ${s.label}. Price for this date/time: ₹${selectedPrice()}/hour. Pay using the UPI button, then enter your UTR.`)});slotsEl.appendChild(b)}const available=visibleTimes.filter(s=>!bookedSlots.has(s.start)).length;$("slotCount").textContent=`${available} available`;if(visibleTimes.length===0){const empty=document.createElement("p");empty.className="notice";empty.textContent="No future slots left for this date. Please choose another date.";slotsEl.appendChild(empty)}}
+function updatePayment(){
+ const priceEl=$("slotPrice");
+ if(selectedSlot===null){priceEl.textContent="Select a slot first";return}
+ priceEl.textContent=`₹${selectedPrice()} / 1 hour`;
+}
+function renderSlots(){slotsEl.innerHTML="";const visibleTimes=times().filter(s=>!isPastOrStarted(s.start));if(selectedSlot!==null&&!visibleTimes.some(s=>s.start===selectedSlot))selectedSlot=null;for(const s of visibleTimes){const b=document.createElement("button");b.type="button";b.className="slot";b.disabled=bookedSlots.has(s.start);if(b.disabled)b.classList.add("booked");if(selectedSlot===s.start)b.classList.add("selected");b.innerHTML=`${s.label}<small>${b.disabled?"BOOKED":"AVAILABLE"}</small>`;b.addEventListener("click",()=>{selectedSlot=s.start;slotsEl.querySelectorAll(".slot").forEach(x=>x.classList.remove("selected"));b.classList.add("selected");updatePayment();message(`Selected ${s.label}. Price: ₹${selectedPrice()}/hour. Enter your details and click Pay Now.`)});slotsEl.appendChild(b)}const available=visibleTimes.filter(s=>!bookedSlots.has(s.start)).length;$("slotCount").textContent=`${available} available`;if(visibleTimes.length===0){const empty=document.createElement("p");empty.className="notice";empty.textContent="No future slots left for this date. Please choose another date.";slotsEl.appendChild(empty)}}
 async function loadSlots(){bookedSlots=new Set();renderSlots();updatePayment();if(!db){message("Preview mode: connect Supabase to enable live shared availability and real bookings.",true);return}try{const {data,error}=await db.rpc("get_booked_slots",{p_date:dateInput.value});if(error)throw error;bookedSlots=new Set((data||[]).map(x=>Number(x.slot_start)));renderSlots();statusEl.style.display="none"}catch(e){message("Could not load live slots. Check Supabase setup and try again.",true)}}
 dateInput.addEventListener("change",loadSlots);
-$("bookingForm").addEventListener("submit",async e=>{e.preventDefault();if(!selectedSlot){message("Please select a future available time slot first.",true);return}if(!paymentOpened){message("Please click Pay via UPI, complete the payment, then enter the UTR.",true);return}if($("utr").value.trim().length<6){message("Enter the UPI transaction ID / UTR after paying.",true);return}if(isPastOrStarted(selectedSlot)){selectedSlot=null;renderSlots();message("That slot has already started or passed. Please choose a future slot.",true);return}if(!db){message("Online booking is not active yet. Set up Supabase using the included README and SQL file.",true);return}confirmBtn.disabled=true;confirmBtn.textContent="Booking…";try{const {data,error}=await db.rpc("create_turf_booking",{p_date:dateInput.value,p_slot_start:selectedSlot,p_name:$("name").value.trim(),p_phone:$("phone").value.trim(),p_notes:(`UTR: ${$("utr").value.trim()} | PAYMENT PENDING MANUAL VERIFICATION | Amount: ₹${selectedPrice()} | ${$("notes").value.trim()}`).slice(0,200)});if(error)throw error;if(!data?.success)throw new Error(data?.message||"That slot is no longer available.");message(`Booking request received (Reference: ${data.booking_id}). Slot is held pending owner verification. Please keep your UPI payment receipt. Payment is not automatically verified by this UPI link; the owner must verify it before confirming the booking.`);$("bookingForm").reset();dateInput.value=localDate;selectedSlot=null;paymentOpened=false;$("utr").value="";updatePayment();await loadSlots()}catch(e){message(e.message?.includes("already")||e.message?.includes("duplicate")?"Sorry, someone just booked that slot. Please choose another time.":"Booking could not be completed. Please refresh availability and try again.",true);await loadSlots()}finally{confirmBtn.disabled=false;confirmBtn.textContent="Confirm Booking"}});
+$("bookingForm").addEventListener("submit",async e=>{
+ e.preventDefault();
+ if(paymentInProgress)return;
+ if(!selectedSlot){message("Please select a future available time slot first.",true);return}
+ if(isPastOrStarted(selectedSlot)){selectedSlot=null;renderSlots();updatePayment();message("That slot has already started or passed. Please choose another slot.",true);return}
+ if(!db){message("Online booking is not active. Please try again later.",true);return}
+ if(!window.Razorpay){message("Razorpay Checkout did not load. Refresh the page and try again.",true);return}
+ paymentInProgress=true;
+ confirmBtn.disabled=true;
+ confirmBtn.textContent="Creating secure payment…";
+ try{
+   const requestBody={
+     name:$("name").value.trim(),
+     phone:$("phone").value.trim(),
+     date:dateInput.value,
+     slot_start:selectedSlot
+   };
+   const {data:orderData,error:orderError}=await db.functions.invoke("create-order",{body:requestBody});
+   if(orderError)throw new Error(orderError.message||"Could not start payment");
+   if(!orderData||!orderData.order_id||!orderData.booking_id||!orderData.key_id){
+     throw new Error(orderData?.error||"Payment order could not be created");
+   }
+
+   const options={
+     key:orderData.key_id,
+     amount:orderData.amount,
+     currency:orderData.currency||"INR",
+     name:"Tirumala Sports Arena Turf",
+     description:`Turf booking · ${orderData.booking_date} · ${times().find(x=>x.start===Number(orderData.slot_start))?.label||"1 hour"}`,
+     order_id:orderData.order_id,
+     prefill:{name:requestBody.name,contact:requestBody.phone},
+     notes:{booking_id:String(orderData.booking_id)},
+     theme:{color:"#b7f36b"},
+     handler:async function(paymentResponse){
+       confirmBtn.textContent="Verifying payment…";
+       try{
+         const {data:verifyData,error:verifyError}=await db.functions.invoke("verify-payment",{
+           body:{
+             booking_id:orderData.booking_id,
+             razorpay_order_id:paymentResponse.razorpay_order_id,
+             razorpay_payment_id:paymentResponse.razorpay_payment_id,
+             razorpay_signature:paymentResponse.razorpay_signature
+           }
+         });
+         if(verifyError)throw new Error(verifyError.message||"Server verification failed");
+         if(!verifyData?.success)throw new Error(verifyData?.error||"Payment could not be verified");
+         message(`Payment verified! Your booking is confirmed. Booking reference: ${orderData.booking_id}.`);
+         $("bookingForm").reset();
+         dateInput.value=localDate;
+         selectedSlot=null;
+         updatePayment();
+         await loadSlots();
+       }catch(err){
+         message(`Payment may have succeeded, but automatic verification did not finish. Do not pay again. Save your Razorpay payment ID (${paymentResponse.razorpay_payment_id}) and contact the turf owner.`,true);
+       }finally{
+         paymentInProgress=false;
+         confirmBtn.disabled=false;
+         confirmBtn.textContent="Pay Now";
+       }
+     },
+     modal:{
+       ondismiss:function(){
+         paymentInProgress=false;
+         confirmBtn.disabled=false;
+         confirmBtn.textContent="Pay Now";
+         message("Payment window closed. If you did not pay, the temporary slot reservation expires in 10 minutes.",true);
+         loadSlots();
+       }
+     }
+   };
+   const checkout=new window.Razorpay(options);
+   checkout.on("payment.failed",function(response){
+     paymentInProgress=false;
+     confirmBtn.disabled=false;
+     confirmBtn.textContent="Pay Now";
+     const reason=response?.error?.description||"Payment failed or was cancelled.";
+     message(`${reason} You can try again; any temporary reservation expires after 10 minutes.`,true);
+     loadSlots();
+   });
+   checkout.open();
+ }catch(err){
+   paymentInProgress=false;
+   confirmBtn.disabled=false;
+   confirmBtn.textContent="Pay Now";
+   message(err.message||"Could not start payment. Please try again.",true);
+ }
+});
 renderSlots();loadSlots();setInterval(()=>{const oldSelection=selectedSlot;renderSlots();if(oldSelection!==null&&selectedSlot===null)message("That slot has started. Please choose a future slot.",true);},30000);
 </script>
 </body></html>
